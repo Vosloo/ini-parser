@@ -3,9 +3,18 @@
 #include <string.h>
 #include <stdbool.h>
 
+struct Data
+{
+    char* section;
+    char* key;
+
+    char* keyValue;
+};
+
+
 char* getSection(const char* section_key) {
     int sectionSize = 0;
-    for (int i = 0; i < strlen(section_key); i++)
+    for (size_t i = 0; i < strlen(section_key); i++)
     {
         if(section_key[i] == '.')
             break;
@@ -42,7 +51,7 @@ char* getKey(const char* section_key) {
     int keySize = 0;
     int start = 0;
     bool begin = false;
-    for (int i = 0; i < strlen(section_key); i++)
+    for (size_t i = 0; i < strlen(section_key); i++)
     {
         if(begin)
             keySize++;
@@ -76,12 +85,70 @@ void processLine(char line[], size_t* length) {
 }
 
 bool checkKey(char* key, char* tmp_line) {
-    for(int i = 0; i < strlen(key); i++)
+    size_t keySize = strlen(key);
+    bool theSame = false;
+    for (size_t i = 0; i < strlen(tmp_line); i++)
     {
-        if(key[i] != tmp_line[i])
-            return false;
+        if (i == keySize && tmp_line[i] != ' ')
+            break;
+
+        if (i == keySize && tmp_line[i] == ' ')
+        {
+            theSame = true;
+            break;
+        }  
+
+        if (key[i] != tmp_line[i])
+            break;
     }
-    return true;
+
+    return theSame;
+}
+
+char* getKeyValue(char* tmp_line) {
+    int len = strlen(tmp_line) + 1; 
+    int valueInd = -1;
+    for(int i = 0; i < len; i++)
+    {
+        if (tmp_line[i] == '=')
+        {
+            valueInd = i + 2;
+            break;
+        }
+    }
+
+    if (valueInd == -1 || valueInd >= len - 1) 
+    {
+        printf("File contains corrupted value of key!\n");
+        return NULL;
+    }
+
+    int valueSize = len - valueInd;
+    char value[valueSize];
+    for (int i = valueInd; i < len; i++)
+    {
+        value[i - valueInd] = tmp_line[i];
+    }
+    return strndup(value, valueSize);
+}
+
+// TODO: print values from 'data';
+void printData(struct Data data) {
+    if (data.section != NULL)
+        printf(data.section);
+    if (data.key != NULL)
+        printf(data.key);
+    if (data.keyValue != NULL)
+        printf(data.keyValue);
+}
+
+void freeMemory(char* lineHolder, char* section, char* printSection, 
+                char* key, char* keyValue) {
+    free(lineHolder);
+    free(section);
+    free(printSection);
+    free(key);
+    free(keyValue);
 }
 
 void processFile(const char* filename, const char* section_key) {
@@ -92,6 +159,8 @@ void processFile(const char* filename, const char* section_key) {
         return; // No such file
     }
     
+    struct Data data = {.section = NULL, .key = NULL, .keyValue = NULL};
+
     char* section = getSection(section_key);
     char* key = getKey(section_key);
     if(section == NULL || key == NULL)
@@ -100,6 +169,7 @@ void processFile(const char* filename, const char* section_key) {
         return;
     }
     char* printSection = getPrintSection(section);
+    char* keyValue = NULL;
 
     bool sectionFound = false;
     bool keyFound = false;
@@ -126,6 +196,13 @@ void processFile(const char* filename, const char* section_key) {
                 bool valid_key = checkKey(key, tmp_line);
                 if(valid_key)
                 {
+                    data.key = tmp_line;
+
+                    keyValue = getKeyValue(tmp_line); 
+                    if (keyValue == NULL)
+                        return;
+                    
+                    data.keyValue = keyValue;
                     keyFound = true;
                 }
             }
@@ -133,10 +210,13 @@ void processFile(const char* filename, const char* section_key) {
 
         if(strcmp(tmp_line, section) == 0)
         {
+            data.section = tmp_line;
             sectionFound = true;
             searchingKey = true;
         }
     }
+
+    // printData(data);
 
     if(!sectionFound)
         printf("Section \"%s\" not found for file: \"%s\".\n", printSection, filename);
@@ -150,10 +230,11 @@ void processFile(const char* filename, const char* section_key) {
 
     if(keyFound)
     {
-        printf("Success!\n");
+        printf("Value for \"%s\" in section \"%s\" is: \"%s\"\n", 
+            key, printSection, keyValue);
     }
     
-    free(lineHolder);
+    freeMemory(lineHolder, section, printSection, key, keyValue);
     fclose(file);
     return;
 }
@@ -161,23 +242,25 @@ void processFile(const char* filename, const char* section_key) {
 int main(int argc, const char* argv[]) {
     if(argc < 3)
     {
-        printf("At least one .ini file "
-            "with section.key must be passed as an argument!\n"
+        printf("\nAt least one .ini file "
+            "with section.key must be passed as an argument!\n\n"
         );
         return -1;
     }
 
     if((argc - 1) % 2 != 0)
     {
-        printf("Every .ini file must be supplied with "
-            "section.key as a next argument!\n"
+        printf("\nEvery .ini file must be supplied with "
+            "section.key as a next argument!\n\n"
         );
         return -1;
     }
 
     for(int i = 1; i < argc; i += 2)
     {
+        printf("\n");
         processFile(argv[i], argv[i + 1]);
+        printf("\n");
     }
 
     return 0;
