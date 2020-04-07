@@ -2,14 +2,19 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdbool.h>
+#include <ctype.h>
 
-struct Data
-{
+typedef struct Data {
     char* section;
-    char* key;
 
+    char* key;
     char* keyValue;
-};
+
+    const char* filename;
+
+    bool sectionFound;
+    bool keyFound;
+}Data;
 
 
 char* getSection(const char* section_key) {
@@ -75,12 +80,33 @@ char* getKey(const char* section_key) {
     return strndup(key, keySize);
 }
 
-void processLine(char line[], size_t* length) {
+bool isApprovedChar(char chr)
+{
+    char approvedChars[] = {'[', ']', ' ', '=', '\n'};
+    for (size_t i = 0; i < strlen(approvedChars); i++)
+    {
+        if (chr == approvedChars[i])
+            return true;
+    }
+    return false;
+}
+
+void processLine(char line[], size_t* length, const char* filename) {
     *length = strlen(line);
+
     if(line[*length - 1] == '\n')
     {
         line[*length - 1] = 0;
         *length = strlen(line);
+    }
+
+    for (size_t i = 0; i < *length; i++)
+    {
+        if(isalpha(line[i]) == 0 && isdigit(line[i]) == 0 && !isApprovedChar(line[i]))
+        {
+            printf("Line \"%s\" containts corrupted value for file \"%s\".\n", line, filename);
+            break;
+        }
     }
 }
 
@@ -118,10 +144,7 @@ char* getKeyValue(char* tmp_line) {
     }
 
     if (valueInd == -1 || valueInd >= len - 1) 
-    {
-        printf("File contains corrupted value of key!\n");
         return NULL;
-    }
 
     int valueSize = len - valueInd;
     char value[valueSize];
@@ -132,23 +155,39 @@ char* getKeyValue(char* tmp_line) {
     return strndup(value, valueSize);
 }
 
-// TODO: print values from 'data';
-void printData(struct Data data) {
-    if (data.section != NULL)
-        printf(data.section);
-    if (data.key != NULL)
-        printf(data.key);
-    if (data.keyValue != NULL)
-        printf(data.keyValue);
+void printData(Data data) {
+    if (!data.sectionFound)
+    {
+        printf("Section \"%s\" not found for file: \"%s\".\n", data.section, data.filename);
+        return;
+    }
+
+    if (!data.keyFound)
+    {
+        printf("Key \"%s\" not found in "
+            "section \"%s\" for file: \"%s\".\n", data.key, data.section, data.filename
+        );
+        return;
+    }
+
+    if (data.keyValue == NULL)
+    {
+        printf("File \"%s\" contains corrupted value in section: "
+               "\"%s\" for key \"%s\"!\n", data.filename, data.section, data.key);
+        return;
+    }
+    
+    printf("Value for \"%s\" in section \"%s\" is: \"%s\".\n", 
+        data.key, data.section, data.keyValue);
 }
 
-void freeMemory(char* lineHolder, char* section, char* printSection, 
-                char* key, char* keyValue) {
+void freeMemory(char* lineHolder, char* section, char* key, 
+                char* keyValue, Data data) {
     free(lineHolder);
     free(section);
-    free(printSection);
     free(key);
     free(keyValue);
+    free(data.section);
 }
 
 void processFile(const char* filename, const char* section_key) {
@@ -158,8 +197,6 @@ void processFile(const char* filename, const char* section_key) {
         perror(filename);
         return; // No such file
     }
-    
-    struct Data data = {.section = NULL, .key = NULL, .keyValue = NULL};
 
     char* section = getSection(section_key);
     char* key = getKey(section_key);
@@ -168,11 +205,12 @@ void processFile(const char* filename, const char* section_key) {
         printf("Invalid argument: \"%s\" for file: \"%s\".\n", section_key, filename);
         return;
     }
-    char* printSection = getPrintSection(section);
+
+    Data data = {.section = getPrintSection(section), .key = key, .keyValue = NULL,
+                .filename = filename, .sectionFound = false, .keyFound = false};
+    
     char* keyValue = NULL;
 
-    bool sectionFound = false;
-    bool keyFound = false;
     bool searchingKey = false;
 
     char* lineHolder = NULL;
@@ -185,7 +223,8 @@ void processFile(const char* filename, const char* section_key) {
         
         char tmp_line[read_chars];
         strcpy(tmp_line, lineHolder);
-        processLine(tmp_line, &length);
+
+        processLine(tmp_line, &length, filename);
 
         if(searchingKey)
         {
@@ -196,46 +235,29 @@ void processFile(const char* filename, const char* section_key) {
                 bool valid_key = checkKey(key, tmp_line);
                 if(valid_key)
                 {
-                    data.key = tmp_line;
+                    data.keyFound = true;
 
                     keyValue = getKeyValue(tmp_line); 
                     if (keyValue == NULL)
-                        return;
-                    
+                        break;
+
                     data.keyValue = keyValue;
-                    keyFound = true;
                 }
             }
         }
 
         if(strcmp(tmp_line, section) == 0)
         {
-            data.section = tmp_line;
-            sectionFound = true;
+            data.sectionFound = true;
             searchingKey = true;
         }
     }
 
-    // printData(data);
-
-    if(!sectionFound)
-        printf("Section \"%s\" not found for file: \"%s\".\n", printSection, filename);
-
-    if(sectionFound && !keyFound)
-    {
-        printf("Key \"%s\" not found in "
-            "section \"%s\" for file: \"%s\".\n", key, printSection, filename
-        );
-    }
-
-    if(keyFound)
-    {
-        printf("Value for \"%s\" in section \"%s\" is: \"%s\"\n", 
-            key, printSection, keyValue);
-    }
+    printData(data);
     
-    freeMemory(lineHolder, section, printSection, key, keyValue);
+    freeMemory(lineHolder, section, key, keyValue, data);
     fclose(file);
+
     return;
 }
 
